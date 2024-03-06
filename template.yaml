@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: 2010-09-09
+Resources:
+  InstanceProfileRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: ec2-instance-profile
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: 'sts:AssumeRole'
+            Principal:
+              Service: ec2.amazonaws.com
+      Description: Instance profile
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AWSElasticBeanstalkMulticontainerDocker'
+        - 'arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier'
+        - 'arn:aws:iam::aws:policy/AWSElasticBeanstalkWorkerTier'
+  InstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Roles:
+        - !Ref InstanceProfileRole
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+        GroupDescription: Allow all traffic
+        VpcId: !Ref VpcID
+        SecurityGroupIngress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+        SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+  ElasticBeanstalkServiceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: 'elasticbeanstalk-service-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Action: 'sts:AssumeRole'
+            Principal:
+              Service: 'elasticbeanstalk.amazonaws.com'
+      Description: 'Allows Elastic Beanstalk to create and manage AWS resources on your behalf.'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess-AWSElasticBeanstalk
+        - arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkEnhancedHealth
+        - arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkService
+  FlaskApplication:
+    Type: 'AWS::ElasticBeanstalk::Application'
+    Properties:
+      ApplicationName: flask-app
+      Description: A simple flask application
+  FlaskApplicationVersion:
+    Type: AWS::ElasticBeanstalk::ApplicationVersion
+    Properties:
+      ApplicationName: !Ref FlaskApplication
+      SourceBundle:
+        S3Bucket: !Ref BucketName
+        S3Key: !Ref BucketKey
+  FlaskAppEnvironment:
+    Type: 'AWS::ElasticBeanstalk::Environment'
+    Properties:
+      ApplicationName: !Ref FlaskApplication
+      EnvironmentName: flask-app-env
+      OptionSettings:
+        - Namespace: 'aws:autoscaling:asg'
+          OptionName: MinSize
+          Value: 2
+        - Namespace: 'aws:autoscaling:asg'
+          OptionName: MinSize
+          Value: 4
+        - Namespace: 'aws:ec2:instances'
+          OptionName: InstanceTypes
+          Value: t3.micro
+        - Namespace: 'aws:autoscaling:launchconfiguration'
+          OptionName: IamInstanceProfile
+          Value: !Ref InstanceProfile
+        - Namespace: 'aws:autoscaling:launchconfiguration'
+          OptionName: SecurityGroups
+          Value: !Ref InstanceSecurityGroup
+        - Namespace: 'aws:autoscaling:trigger'
+          OptionName: LowerThreshold
+          Value: 30
+        - Namespace: 'aws:autoscaling:trigger'
+          OptionName: MeasureName
+          Value: CPUUtilization
+        - Namespace: 'aws:autoscaling:trigger'
+          OptionName: Unit
+          Value: Percent
+        - Namespace: 'aws:autoscaling:trigger'
+          OptionName: UpperThreshold
+          Value: 80
+        - Namespace: 'aws:ec2:vpc'
+          OptionName: VPCId
+          Value: !Ref VpcID
+        - Namespace: 'aws:ec2:vpc'
+          OptionName: Subnets
+          Value: !Ref SubnetsEC2
+        - Namespace: 'aws:ec2:vpc'
+          OptionName: ELBSubnets
+          Value: !Ref SubnetsELB
+        - Namespace: 'aws:elasticbeanstalk:application'
+          OptionName: Application Healthcheck URL
+          Value: /
+        - Namespace: 'aws:elasticbeanstalk:environment'
+          OptionName: ServiceRole
+          Value: !Ref ElasticBeanstalkServiceRole
+        - Namespace: 'aws:elasticbeanstalk:environment'
+          OptionName: LoadBalancerType
+          Value: application
+      PlatformArn: >-
+        arn:aws:elasticbeanstalk:ap-south-1::platform/Python 3.11 running on
+        64bit Amazon Linux 2023/4.0.9
+      Tier: 
+        Name: WebServer
+        Type: Standard
+      VersionLabel: !Ref FlaskApplicationVersion
+Parameters:
+  VpcID:
+    Type: String
+    Description: The ID of the existing VPC where the resources will be created
+  SubnetsEC2:
+    Type: String
+    Description: Comma-seperated subnet IDs where the instances will be created
+  SubnetsELB:
+    Type: String
+    Description: Comma-seperated subnet IDs where the load balancer will be created
+  BucketName:
+    Type: String
+    Description: The Amazon S3 bucket where the source code is located
+  BucketKey:
+    Type: String
+    Description: The Amazon S3 key where the source code is located
